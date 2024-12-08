@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>【自己学習】自然言語から画像を検索するAIを実装してみた</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 20px;
+        }
+        h1, h2, h3 {
+            color: #333;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 10px 0;
+        }
+        .image-placeholder {
+            width: 100%;
+            height: 200px;
+            background-color: #f0f0f0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #888;
+            margin: 10px 0;
+            border: 1px dashed #ccc;
+        }
+        strong {
+            font-weight: bold;
+        }
+        /* スタイルを追加して、折りたたみ部分の見た目を調整 */
+        details {
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+        }
+        summary {
+            font-weight: bold;
+            cursor: pointer;
+        }
+        pre, code {
+            background-color: #ffffff; /* 明示的に白背景を設定 */
+            color: #333; /* コードのテキスト色を設定 */
+        }
+        
+    </style>
+</head>
+<body>
+
+    <h1>【自己学習】自然言語から画像を検索するAIを実装してみた</h1>
+
+    <h2>はじめに</h2>
+    <p>近頃、整理もせずにスマホやPCに写真を溜め込み続けていて、「あの写真、どこに行ったっけ？」とフォルダを探し回る面倒さを痛感します。
+        そこで思いついたのが、自然言語で直接画像を検索できたら便利ではないか、というアイデアです。
+        業務では画像認識関連のタスクがほとんどな私ですが、自然言語処理分野にも興味があります。そのため、その両者が交わるところ——すなわち、
+        <strong>テキストで画像を検索する仕組み</strong>の実装を試してみることにしました。</p>
+    
+    <p><strong>CLIP</strong>というモデルを使うと、テキストと画像を同じ「意味ベクトル空間」（テキストと画像が共通の理解を持つ領域）で比較可能になります。これを日本語対応モデルrinna/japanese-clip-vit-b-16で試せば、日本語のクエリを使った画像検索が実現できるかもしれません。</p>
+    
+    
+    <h2>CLIPとは？ 〜 画像とテキストを同じ意味ベクトル空間へ 〜</h2>
+    <p><strong>CLIP</strong>（Contrastive Language-Image Pre-training）は、
+        画像とテキストを同じ「意味ベクトル空間」（テキストと画像が共通の理解を持つ領域）
+        にマッピングするモデルです。
+        たとえば「ウマ」というテキストをベクトル化し、ウマの写真も同じ空間に埋め込むと、
+        両者が意味的に近ければ近いほど、ベクトルは共に同じような位置に配置されます。
+        一方、「ドーナツ」というテキスト、またはドーナツの画像をベクトル化したものは、
+        「ウマ」のベクトルとは離れた位置に配置されることになります。
+        これにより、テキストと画像の柔軟な対応付けが可能となります。</p>
+    
+    <img src="images/意味ベクトル空間の説明.png" alt="意味ベクトル空間の説明">
+    
+    <p>英語版CLIP（ViT-B/32）では日本語クエリで満足な結果が得られませんでしたが、日本語対応モデル（rinna/japanese-clip-vit-b-16）では、日本語で指定した内容に対して、ある程度それらしい画像を抽出できることを確認しました。</p>
+    
+    <h2>実装・処理の流れ</h2>
+    <ol>
+        <li>
+            <strong>画像の用意</strong><br>
+            今回は私の個人フォルダから、無作為に写真を合計284枚取り出してローカルに保存しました。
+        </li>
+        <li>
+            <strong>画像の前処理</strong><br>
+            CLIPは224x224ピクセルの正方形画像を入力サイズとして想定しているため、元画像を縦横比を保ったまま縮小し、足りない部分は黒枠で埋めます（いわゆるレターボックス処理）。
+            <img src="images/前処理の例.jpg" alt="前処理の例">
+        </li>
+        <li>
+            <strong>画像のベクトル化</strong><br>
+            前処理した画像をモデルに入力し、512次元のベクトル表現（埋め込み）を取得します。フォルダ内のすべての画像を一度ベクトル化しておけば、検索時にこれらのベクトルを参照するだけで済みます。
+        </li>
+        <li>
+            <strong>テキストクエリのベクトル化</strong><br>
+            「ガラスに囲われている神社」「スキー場で、ピースしてる男」といった日本語クエリもテキストエンコーダに通し、対応するベクトルを得ます。これで、画像とテキストを同じ「意味ベクトル空間」で比較可能になります。
+        </li>
+        <li>
+            <strong>検索処理</strong><br>
+            あとは、テキストベクトルと画像ベクトル群の類似度（内積）を計算し、スコアが高い画像を上位表示すれば、自然言語による画像検索が成立します。
+        </li>
+    </ol>
+    <img src="images/AI画像検索の説明.png" alt="AI画像検索の説明">
+    
+    <h2>実験結果</h2>
+    <p>いくつかのクエリで試してみました。</p>
+    
+    <h3>「ガラスに囲われている神社」</h3>
+    <p>ガラス越しの神社がきちんと上位に出現。どこかの駅で撮影した気がします。普通の神社も混ぜていましたが、ガラスに囲われている方に比べてスコアは低く、想定通りの結果になりました。</p>
+    <img src="images/ガラスに囲われた神社.png" alt="ガラスに囲われた神社の検索結果">
+    <img src="images/普通の神社.png" alt="普通の神社の画像・スコア">
+    
+    <h3>「つけ麺。皿が２つある」</h3>
+    <p>残念ながら、この検索はうまくいきませんでした。期待していたつけ麺写真は出ず、代わりにスパゲッティ写真が1位にランクイン。つけ麺の写真のスコアは4位でした。</p>
+    <p>「つけ麺」という概念をモデルが十分理解していないか、あるいは麺の種類という細かい条件の把握が難しかったのかもしれません。</p>
+    <img src="images/つけ麺.png" alt="失敗例">
+    
+    <h3>「スキー場で、ピースしてる男」</h3>
+    <p>こちらは好調。スキー場でピースしている写真がトップを獲得し、モデルが複合的な条件をうまく捉えていることがうかがえました。</p>
+    <img src="images/スキー場でピースしてる男.png" alt="成功例">
+    
+    <h2>アテンションマップ可視化への挑戦</h2>
+    <p>モデルが画像のどこを見て判断しているかを示すアテンションマップ可視化にも挑戦しました。しかし、スキー場でピースする画像のアテンションマップを可視化しても、</p>
+    <img src="images/アテンションマップの例.png" alt="アテンション可視化例">
+    <p>のように、ピース部分に明確な注目が見られず、直感的理解とは程遠い結果でした。</p>
+    
+    <p>実装が間違っているかもですが、アテンション可視化にはさらなる工夫が必要で、現在の単純な実装ではモデルの「視点」をわかりやすく示すのは難しそうです。この辺りは要勉強です。</p>
+    <img src="images/アテンションマップの例.png" alt="アテンション可視化例">
+    
+    <h2>ベクトルを日本語で説明する試み</h2>
+    <p>本当は、CLIPで得た画像ベクトルを日本語テキストに戻して「この画像は〇〇です」という説明を出し、検索クエリと比較する、ということも試してみたかったのですが、CLIPにはベクトルからテキストへの生成能力がありません。画像キャプションモデルなど別のモデルの実装が必要で、分析が一気に複雑化するため今回は断念しました。</p>
+    
+    <h2>まとめ：学びと振り返り</h2>
+    
+    <h3>部分的な成功と限界:</h3>
+    <p>「ガラスに囲われた神社」や「スキー場でピースしてる男」の検索は期待通りでした。一方、「つけ麺。皿が２つある」というような細かい条件では、モデルの知識不足や表現力の限界を感じました。</p>
+    
+    <h3>分散表現による柔軟な検索:</h3>
+    <p>タグ付けやフォルダ分けをしなくても、テキストと画像の意味的対応により柔軟な検索ができることを実装を通じて体験できました。Googleの検索アルゴリズムも、2019年にBARTというモデルが採用され、以降は意味ベクトルの類似度計算を用いているらしいですが、どうすればあそこまで精度が出るのか気になりますね。</p>
+    
+    <h3>アテンション可視化の難しさ:</h3>
+    <p>単純な可視化では、モデルが何を重視しているかを人間が直感的に理解するのは難しく、さらなる改善が必要と感じました。</p>
+    
+    <h3>さらなる発展の余地:</h3>
+    <p>画像キャプション生成モデルや、より大型・高度なモデルを組み合わせれば、より精度の高い検索や直感的な説明表示も可能になるかもしれないと感じました。気が向いたらやってみます。</p>
+    
+    <!-- 付録: コードセクションの追加 -->
+    <h2>付録: コード</h2>
+    
+    <!-- インポート部分 -->
+    <details>
+        <summary><strong>インポート・モデルの定義</strong></summary>
+        <pre><code class="language-python">import os
+import torch
+import japanese_clip as ja_clip
+from PIL import Image
+import numpy as np
+from tqdm import tqdm
+import matplotlib.pyplot as plt
+from torchvision import transforms
+
+# デバイスの設定（GPUまたはCPU）
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
+# Japanese CLIPモデルと前処理関数の読み込み
+model, _ = ja_clip.load('rinna/japanese-clip-vit-b-16', device=device)
+</code></pre>
+    </details>
+
+    <!-- 画像の前処理クラスの定義 -->
+    <details>
+        <summary><strong>画像の前処理クラスの定義</strong></summary>
+        <pre><code class="language-python">mean = [0.48145466, 0.4578275, 0.40821073]
+std = [0.26862954, 0.26130258, 0.27577711]
+
+## 画像の前処理クラス
+class LetterboxTransform:
+    def __init__(self, size=(224,224), fill_color=(0,0,0)):
+        self.size = size
+        self.fill_color = fill_color
+
+    def __call__(self, img: Image.Image):
+        w, h = img.size
+        scale = min(self.size[0]/h, self.size[1]/w)
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+
+        # リサイズ（アスペクト比保持）
+        resized = img.resize((new_w, new_h), Image.BILINEAR)
+
+        # 新しい224x224の黒背景キャンバスを作る
+        new_img = Image.new("RGB", self.size, self.fill_color)
+        top = (self.size[1] - new_h)//2
+        left = (self.size[0] - new_w)//2
+        new_img.paste(resized, (left, top))
+        return new_img
+
+# 新たな前処理パイプラインを定義
+# 1. アスペクト比維持でLetterboxで224x224へ
+# 2. ToTensor()でTensor化
+# 3. CLIP標準化(mean/std)
+preprocess = transforms.Compose([
+    LetterboxTransform(size=(224,224), fill_color=(0,0,0)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=mean, std=std)
+])
+</code></pre>
+    </details>
+    
+    <!-- 撮影画像をベクトル化する処理 -->
+    <details>
+        <summary><strong>撮影画像をベクトル化する処理</strong></summary>
+        <pre><code class="language-python"># 画像フォルダのパスを指定
+image_folder = "/Users/nakashimaryotaro/Desktop/自己学習/AI画像検索_簡易版/myfolder"
+
+# 画像ファイルのパスを取得
+image_paths = [
+    os.path.join(image_folder, fname)
+    for fname in os.listdir(image_folder)
+    if fname.endswith(('.jpg', '.JPG', '.jpeg', '.png', '.PNG'))
+]
+
+# 画像のベクトル表現とファイルパスを格納するリスト
+image_embeddings = []
+image_files = []
+
+# 各画像をベクトル化
+for image_path in tqdm(image_paths, desc="画像の処理中"):
+    try:
+        # 画像を開き、前処理を適用
+        image = preprocess(Image.open(image_path)).unsqueeze(0).to(device)
+        with torch.no_grad():
+            # 画像をベクトル表現にエンコード
+            image_embedding = model.get_image_features(image)
+        # ベクトルを正規化
+        image_embedding /= image_embedding.norm(dim=-1, keepdim=True)
+        # 次元を統一してリストに追加
+        image_embeddings.append(image_embedding.cpu().numpy().squeeze(0))
+        image_files.append(image_path)
+    except Exception as e:
+        print(f"{image_path} の処理中にエラー: {e}")
+
+# ベクトルを結合
+if len(image_embeddings) == 0:
+    raise ValueError("image_embeddingsが空です。画像フォルダのパスを確認してください。")
+image_embeddings = np.stack(image_embeddings, axis=0)
+</code></pre>
+    </details>
+    
+    <!-- クエリ（検索文字列）をベクトル化し、ベクトル化した画像から類似したものを探す関数の定義 -->
+    <details>
+        <summary><strong>クエリ（検索文字列）をベクトル化し、ベクトル化した画像から類似したものを探す関数の定義</strong></summary>
+        <pre><code class="language-python"># PyTorchのTensorに変換
+embedding_dim = 512  # 埋め込み次元（モデルに依存）
+image_embeddings = torch.tensor(image_embeddings, device=device).view(-1, embedding_dim)
+
+# 検索関数
+def search(query, image_embeddings, image_files, top_k=5):
+    with torch.no_grad():
+        # クエリをベクトル化
+        tokens = ja_clip.tokenize(query)
+        input_ids = tokens['input_ids'].to(device)
+        attention_mask = tokens['attention_mask'].to(device)
+
+        # テキストをベクトル化
+        text_embedding = model.get_text_features(input_ids=input_ids, attention_mask=attention_mask)
+
+        # 検索スコア計算
+        scores = torch.matmul(text_embedding, image_embeddings.T)
+
+        # スコア上位を取得
+        top_scores, indices = torch.topk(scores, top_k)
+
+        # indicesとtop_scoresは[1, top_k]の形状になっているので0行目を参照
+        indices = indices[0]       # (top_k,) 形状
+        top_scores = top_scores[0] # (top_k,) 形状
+
+        # enumerateを使って各順位j（0～top_k-1）とインデックスidxを取得
+        results = []
+        for j, idx in enumerate(indices):
+            img_idx = idx.item()
+            score = top_scores[j].item()
+            results.append((image_files[img_idx], score))
+
+        return results
+</code></pre>
+    </details>
+    
+    <!-- 検索の実行・画像の可視化 -->
+    <details>
+        <summary><strong>検索の実行・画像の可視化</strong></summary>
+        <pre><code class="language-python"># 検索クエリ
+query = "スキー場で、ピースしてる男"
+
+# 検索実行
+results = search(query, image_embeddings, image_files, top_k=4)
+
+# 検索結果を表示
+for img_path, score in results:
+    img = Image.open(img_path)
+    plt.imshow(img)
+    plt.title(f"score: {score:.4f}")
+    plt.axis('off')
+    plt.show()
+</code></pre>
+    </details>
+    
+    <!-- モデルの注目箇所を可視化する処理 -->
+    <details>
+        <summary><strong>モデルの注目箇所を可視化する処理</strong></summary>
+        <pre><code class="language-python"># アテンション可視化のための画像選択（上位1件を例に）
+img_path = results[1][0]
+image = Image.open(img_path)
+image_input = preprocess(image).unsqueeze(0).to(device)
+
+# アテンション取得
+model.vision_model.config.output_attentions = True
+with torch.no_grad():
+    outputs = model.vision_model(image_input, output_attentions=True)
+
+attentions = outputs.attentions
+last_layer_attention = attentions[-1]
+avg_attention = last_layer_attention.mean(dim=1)  # [batch, tokens, tokens]
+
+# CLSトークンから他トークンへのAttention
+cls_attention = avg_attention[0, 0, 1:]
+num_patches = cls_attention.shape[0]
+patch_size = int(num_patches**0.5)
+cls_attention = cls_attention.reshape(patch_size, patch_size).cpu().numpy()
+
+# Attention正規化
+cls_attention = cls_attention - cls_attention.min()
+cls_attention = cls_attention / cls_attention.max()
+
+# preprocessで行われている正規化を逆変換
+# 参考: CLIP標準化パラメータ（モデルにより異なるため適宜変更）
+mean = [0.48145466, 0.4578275, 0.40821073]
+std = [0.26862954, 0.26130258, 0.27577711]
+
+# preprocess後の画像をnumpy化
+input_image_np = image_input.squeeze(0).permute(1, 2, 0).cpu().numpy()
+# 標準化解除
+inv_image = input_image_np
+for c in range(3):
+    inv_image[..., c] = inv_image[..., c] * std[c] + mean[c]
+inv_image = np.clip(inv_image, 0, 1)
+inv_image_uint8 = (inv_image * 255).astype(np.uint8)
+
+# Attentionマップを224x224に拡大
+attention_resized = Image.fromarray((cls_attention*255).astype(np.uint8)).resize((224, 224), Image.BILINEAR)
+attention_resized = np.array(attention_resized)
+
+# 可視化
+plt.figure(figsize=(10,10))
+plt.imshow(inv_image_uint8)
+plt.imshow(attention_resized, cmap='jet', alpha=0.4)
+plt.axis('off')
+plt.title("Model Attention Map (On Preprocessed Image, Normalized Back)")
+plt.show()
+</code></pre>
+    </details>
+    
+</body>
+</html>
